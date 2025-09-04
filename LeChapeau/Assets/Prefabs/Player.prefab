@@ -123,7 +123,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1282798872353755682
 Transform:
   m_ObjectHideFlags: 0
@@ -264,9 +264,10 @@ GameObject:
   - component: {fileID: 6342748224760014757}
   - component: {fileID: 3321242406036548171}
   - component: {fileID: 6271503804998691952}
+  - component: {fileID: 6703629389044217351}
   m_Layer: 0
   m_Name: Player
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -405,9 +406,10 @@ MonoBehaviour:
   prefixField: -1
   Synchronization: 3
   OwnershipTransfer: 0
-  observableSearch: 2
+  observableSearch: 0
   ObservedComponents:
   - {fileID: 6271503804998691952}
+  - {fileID: 6703629389044217351}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
@@ -427,3 +429,21 @@ MonoBehaviour:
   m_SynchronizeRotation: 0
   m_SynchronizeScale: 0
   m_UseLocal: 1
+--- !u!114 &6703629389044217351
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7889191699753284989}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8afd7774298fb44a81fdc171cb22682, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  id: 0
+  moveSpeed: 6
+  jumpForce: 6
+  hatObject: {fileID: 978933362994428606}
+  curHatTime: 0
+  rig: {fileID: 6342748224760014757}
