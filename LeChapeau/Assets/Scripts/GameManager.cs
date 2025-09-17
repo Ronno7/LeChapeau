@@ -8,7 +8,20 @@ public class GameManager : MonoBehaviourPunCallbacks
 {
     // -------------------- Singleton --------------------
     public static GameManager instance;
-    void Awake() => instance = this;
+    void Awake()
+    {
+        instance = this;
+
+        // Raise PUN tick rates before any networked objects/streams start.
+        PhotonNetwork.SendRate = 60;           // packets per second
+        PhotonNetwork.SerializationRate = 30;  // OnPhotonSerializeView per second
+        PhotonNetwork.IsMessageQueueRunning = true; // ensure the queue is not paused
+
+        // Optional but recommended for lobby/scene flows:
+        PhotonNetwork.AutomaticallySyncScene = true;
+
+        Debug.Log($"[PUN] SendRate={PhotonNetwork.SendRate}, SerializationRate={PhotonNetwork.SerializationRate}, MQRunning={PhotonNetwork.IsMessageQueueRunning}");
+    }
 
     // -------------------- Stats --------------------
     [Header("Stats")]

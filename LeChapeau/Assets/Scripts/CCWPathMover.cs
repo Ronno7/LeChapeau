@@ -1,8 +1,9 @@
 ﻿using UnityEngine;
 using Photon.Pun;
+using Photon.Realtime;
 using System.Collections.Generic;
 
-public class CCWPathMover : MonoBehaviourPun
+public class CCWPathMover : MonoBehaviourPunCallbacks
 {
     [Tooltip("Waypoints ordered COUNTER-CLOCKWISE around the trench.")]
     public List<Transform> points = new List<Transform>();
@@ -13,60 +14,106 @@ public class CCWPathMover : MonoBehaviourPun
 
     [Header("Turning")]
     public float turnDuration = 0.15f;       // seconds to rotate 90° left at corners
-    public bool masterAuthority = false;     // true = only Master moves/sends via PhotonTransformView
+    public bool masterAuthority = true;      // owner-only drive (Master by default)
 
     [Header("Physics")]
-    public Rigidbody rb;                     // optional; script will use MovePosition/MoveRotation
+    public Rigidbody rb;                     // used for MovePosition/MoveRotation
 
-    // deterministic time base (shared across clients)
+    // time/path state
     double startTime;
     int prevSeg = -1;
     bool turning = false;
     float turnT = 0f;
     Quaternion rotFrom, rotTo;
 
+    // ownership tracking
+    bool lastIsMine;
+
     void Awake()
     {
         if (!rb) rb = GetComponent<Rigidbody>();
+        ConfigureRB();
+        lastIsMine = photonView.IsMine;
     }
 
-    void OnEnable()
+    // MUST be public to match base signature
+    public override void OnEnable()
     {
+        base.OnEnable();
         startTime = PhotonNetwork.IsConnected ? PhotonNetwork.Time : Time.timeAsDouble;
+        ConfigureRB();
+        lastIsMine = photonView.IsMine;
+    }
+
+    public override void OnMasterClientSwitched(Player newMasterClient)
+    {
+        ConfigureRB();
+    }
+
+    void ConfigureRB()
+    {
+        if (!rb) return;
+
+        bool iAmOwner = !PhotonNetwork.IsConnected || photonView.IsMine;
+
+        if (masterAuthority)
+        {
+            // Owner simulates; remotes are kinematic and interpolate snapshots
+            rb.isKinematic = !iAmOwner;
+            rb.interpolation = iAmOwner ? RigidbodyInterpolation.Interpolate
+                                        : RigidbodyInterpolation.None;
+        }
+        else
+        {
+            // Deterministic mode: everyone simulates identical kinematic motion
+            rb.isKinematic = false;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+        }
     }
 
     void FixedUpdate()
     {
-        if (masterAuthority && PhotonNetwork.IsConnected && !PhotonNetwork.IsMasterClient)
+        // Handle ownership flips (e.g., master handoff) without override hooks
+        if (photonView.IsMine != lastIsMine)
+        {
+            lastIsMine = photonView.IsMine;
+            ConfigureRB();
+        }
+
+        // Owner-only drive when using authority
+        if (masterAuthority && PhotonNetwork.IsConnected && !photonView.IsMine)
             return;
 
         if (points == null || points.Count < 2) return;
 
-        // Parametric progress 0..1 around the closed loop (deterministic)
+        // Parametric progress 0..1 around the loop
         float pathLen = TotalPathLength(points);
         float t = (float)(((PhotonNetwork.IsConnected ? PhotonNetwork.Time : Time.timeAsDouble) - startTime)
                           * speed / Mathf.Max(0.0001f, pathLen));
         t = Mathf.Repeat(t + spacingOffset01, 1f);
 
-        // Segment info and corner detection
+        // Segment + corner detection
         int n = points.Count;
         float segF = t * n;
         int seg = Mathf.FloorToInt(segF) % n;
 
-        if (seg != prevSeg) // crossed a corner → begin 90° LEFT turn
+        if (seg != prevSeg)
         {
             rotFrom = rb ? rb.rotation : transform.rotation;
-            rotTo = Quaternion.AngleAxis(90f, Vector3.up) * rotFrom;  // left turn around Y
+            Vector3 turnAxis = rb ? rb.transform.up : transform.up; // local up (capsule’s +Z after X=90)
+            rotTo = Quaternion.AngleAxis(-90f, turnAxis) * rotFrom; // left turn
             turnT = 0f;
             turning = true;
             prevSeg = seg;
         }
 
-        // Position along the linear path
+        // Position along path
         Vector3 pos = SampleLinear(points, t);
         if (rb) rb.MovePosition(pos); else transform.position = pos;
 
-        // Rotation: ease 90° left at corners, otherwise face along current segment
+        // Rotation: corner ease or face along segment
+        Vector3 localUp = rb ? rb.transform.up : transform.up;
+
         if (turning)
         {
             turnT += Time.fixedDeltaTime / Mathf.Max(0.0001f, turnDuration);
@@ -76,14 +123,13 @@ public class CCWPathMover : MonoBehaviourPun
         }
         else
         {
-            Vector3 turnAxis = rb ? rb.transform.up : transform.up;
             Vector3 a = points[seg].position;
             Vector3 b = points[(seg + 1) % n].position;
-            Vector3 dir = Vector3.ProjectOnPlane(b - a, turnAxis);
+            Vector3 dir = Vector3.ProjectOnPlane(b - a, localUp);
 
             if (dir.sqrMagnitude > 1e-4f)
             {
-                Quaternion r = Quaternion.LookRotation(dir.normalized, turnAxis);
+                Quaternion r = Quaternion.LookRotation(dir.normalized, localUp);
                 if (rb) rb.MoveRotation(r); else transform.rotation = r;
             }
         }
