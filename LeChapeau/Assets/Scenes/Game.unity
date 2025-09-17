@@ -837,7 +837,7 @@ MonoBehaviour:
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.15
-  masterAuthority: 0
+  masterAuthority: 1
   rb: {fileID: 359792872}
 --- !u!114 &359792871
 MonoBehaviour:
@@ -1032,7 +1032,7 @@ MonoBehaviour:
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.15
-  masterAuthority: 0
+  masterAuthority: 1
   rb: {fileID: 405053482}
 --- !u!114 &405053481
 MonoBehaviour:
@@ -2493,7 +2493,7 @@ MonoBehaviour:
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.15
-  masterAuthority: 0
+  masterAuthority: 1
   rb: {fileID: 970147092}
 --- !u!114 &970147091
 MonoBehaviour:
@@ -4315,7 +4315,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   gameEnded: 0
-  timeToWin: 15
+  timeToWin: 30
   invincibleDuration: 0.5
   playerPrefabLocation: Player
   spawnPoints:
@@ -4473,7 +4473,7 @@ MonoBehaviour:
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.15
-  masterAuthority: 0
+  masterAuthority: 1
   rb: {fileID: 1384356119}
 --- !u!114 &1384356118
 MonoBehaviour:

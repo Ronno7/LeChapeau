@@ -76,12 +76,14 @@ public class CCWPathMover : MonoBehaviourPun
         }
         else
         {
+            Vector3 turnAxis = rb ? rb.transform.up : transform.up;
             Vector3 a = points[seg].position;
             Vector3 b = points[(seg + 1) % n].position;
-            Vector3 dir = b - a; dir.y = 0f;
+            Vector3 dir = Vector3.ProjectOnPlane(b - a, turnAxis);
+
             if (dir.sqrMagnitude > 1e-4f)
             {
-                Quaternion r = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                Quaternion r = Quaternion.LookRotation(dir.normalized, turnAxis);
                 if (rb) rb.MoveRotation(r); else transform.rotation = r;
             }
         }
