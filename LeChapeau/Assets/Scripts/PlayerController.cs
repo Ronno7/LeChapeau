@@ -1,54 +1,62 @@
 ﻿using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Photon.Pun;
 using Photon.Realtime;
 
 public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
 {
-    [HideInInspector]
-    public int id;
+    [HideInInspector] public int id;
 
     [Header("Info")]
-    public float moveSpeed;
-    public float jumpForce;
+    public float moveSpeed = 6f;
+    public float jumpForce = 7f;
     public GameObject hatObject;
 
-    [HideInInspector]
-    public float curHatTime;
+    [HideInInspector] public float curHatTime;
 
     [Header("Components")]
     public Rigidbody rig;
     public Player photonPlayer;
 
-    // called when the player object is instantiated
+    [Header("Fall Handling")]
+    [SerializeField] float fallY = 0f;          // trigger line
+    [SerializeField] float rearmMargin = 0.5f;  // must rise this far to rearm
+    bool wasBelow = false;
+
+    // -------------------- Lifecycle --------------------
+
     [PunRPC]
     public void Initialize(Player player)
     {
         photonPlayer = player;
         id = player.ActorNumber;
 
-        GameManager.instance.players[id - 1] = this;
+        GameManager.instance.RegisterPlayer(this);
 
-        // give the first player the hat
+        // First actor gets the hat at match start.
         if (id == 1)
             GameManager.instance.GiveHat(id, true);
 
-        // if this isn't our local player, disable physics as that's
-        // controlled by the user and synced to all other clients
-        if (!photonView.IsMine)
-            rig.isKinematic = true;
+        // Non-owners don't run physics locally.
+        if (!photonView.IsMine && rig) rig.isKinematic = true;
     }
 
-
-    private void Update()
+    void Update()
     {
         if (photonView.IsMine)
         {
-            // fall detection → ask Master to handle
-            if (transform.position.y < 0f)
+            // Edge-trigger fall detection (single RPC per drop).
+            if (transform.position.y < fallY)
             {
-                GameManager.instance.photonView.RPC("HandleFall", RpcTarget.MasterClient, id);
+                if (!wasBelow)
+                {
+                    wasBelow = true;
+                    GameManager.instance.photonView.RPC("HandleFall", RpcTarget.MasterClient, id);
+                }
+            }
+            else if (transform.position.y > fallY + rearmMargin)
+            {
+                wasBelow = false;
             }
 
             Move();
@@ -56,86 +64,70 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
             if (Input.GetKeyDown(KeyCode.Space))
                 TryJump();
 
-            // track the amount of time we're wearing the hat
             if (hatObject.activeInHierarchy)
-            {
                 curHatTime += Time.deltaTime;
-            }
         }
 
-        // if I'm the game host, check to see if this player has won
-        if (PhotonNetwork.IsMasterClient)
+        // Master checks win condition for this player.
+        if (PhotonNetwork.IsMasterClient &&
+            curHatTime >= GameManager.instance.timeToWin &&
+            !GameManager.instance.gameEnded)
         {
-            if (curHatTime >= GameManager.instance.timeToWin && !GameManager.instance.gameEnded)
-            {
-                GameManager.instance.gameEnded = true;
-                GameManager.instance.photonView.RPC("WinGame", RpcTarget.All, id);
-            }
+            GameManager.instance.gameEnded = true;
+            GameManager.instance.photonView.RPC("WinGame", RpcTarget.All, id);
         }
     }
+
+    // -------------------- Movement --------------------
 
     void Move()
     {
         float x = Input.GetAxis("Horizontal") * moveSpeed;
         float z = Input.GetAxis("Vertical") * moveSpeed;
 
+        // If you're on standard Rigidbody, use rig.velocity instead of linearVelocity.
         rig.linearVelocity = new Vector3(x, rig.linearVelocity.y, z);
     }
 
     void TryJump()
     {
-        Ray ray = new Ray(transform.position, Vector3.down);
-
-        if (Physics.Raycast(ray, 0.7f))
+        if (Physics.Raycast(new Ray(transform.position, Vector3.down), 0.7f))
             rig.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
     }
 
-    public void SetHat(bool hasHat)
-    {
-        hatObject.SetActive(hasHat);
-    }
+    // -------------------- Gameplay --------------------
 
-    private void OnCollisionEnter(Collision collision)
-    {
-        if (!photonView.IsMine)
-            return;
+    public void SetHat(bool hasHat) => hatObject.SetActive(hasHat);
 
-        if (collision.gameObject.CompareTag("Player"))
+    void OnCollisionEnter(Collision collision)
+    {
+        if (!photonView.IsMine) return;
+        if (!collision.gameObject.CompareTag("Player")) return;
+
+        if (GameManager.instance.TryGetPlayer(collision.gameObject, out var other) &&
+            other.id == GameManager.instance.playerWithHat &&
+            GameManager.instance.CanGetHat())
         {
-            if (GameManager.instance.GetPlayer(collision.gameObject).id == GameManager.instance.playerWithHat)
-            {
-                if (GameManager.instance.CanGetHat())
-                {
-                    GameManager.instance.photonView.RPC("GiveHat", RpcTarget.All, id, false);
-                }
-            }
+            GameManager.instance.photonView.RPC("GiveHat", RpcTarget.All, id, false);
         }
     }
 
-    // from IPunObservable - allows us to send and receive data
+    // -------------------- Networking --------------------
+
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
     {
-        if (stream.IsWriting)
-        {
-            stream.SendNext(curHatTime); // send info about this playercontroller to others
-        }
-        else if (stream.IsReading)
-        {
-            curHatTime = (float)stream.ReceiveNext(); // receive info about this playercontroller from others
-        }
+        if (stream.IsWriting) stream.SendNext(curHatTime);
+        else curHatTime = (float)stream.ReceiveNext();
     }
 
-    // Teleport is executed on all clients to keep state consistent
     [PunRPC]
     public void Teleport(Vector3 newPosition)
     {
-        transform.position = newPosition;
+        // Small lift avoids immediate ground/edge retrigger.
+        transform.position = newPosition + Vector3.up * 0.05f;
 
-        // Reset motion so they don't keep falling or carry old momentum
-        if (rig != null)
+        if (rig)
         {
-            // If you’re on standard Unity Rigidbody, this is 'velocity'
-            // Change 'linearVelocity' to 'velocity' if needed in your project.
             rig.linearVelocity = Vector3.zero;
             rig.angularVelocity = Vector3.zero;
         }

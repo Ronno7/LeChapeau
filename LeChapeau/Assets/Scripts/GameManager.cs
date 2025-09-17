@@ -1,155 +1,177 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Photon.Pun;
 using Photon.Realtime;
-using System.Linq;
 
 public class GameManager : MonoBehaviourPunCallbacks
 {
+    // -------------------- Singleton --------------------
+    public static GameManager instance;
+    void Awake() => instance = this;
+
+    // -------------------- Stats --------------------
     [Header("Stats")]
     public bool gameEnded = false;
-    public float timeToWin;             // total time to hold the hat to win
-    public float invincibleDuration;    // prevents players from instantly losing hat
-    private float hatPickupTime;        // the time that hat was picked up
+    public float timeToWin = 15f;          // required hat time to win
+    public float invincibleDuration = 1f;  // grace after pickup
+    float hatPickupTime;
 
+    // -------------------- Players & Spawns --------------------
     [Header("Players")]
-    public string playerPrefabLocation; // path in Resources folder
-    public Transform[] spawnPoints;     // array of all available spawn points
-    public PlayerController[] players;  // array of all the players
-    public int playerWithHat;           // id of the player with the hat
-    private int playersInGame;          // number of players in the game
+    public string playerPrefabLocation = "Player";
+    public Transform[] spawnPoints;
 
-    // instance
-    public static GameManager instance;
+    public PlayerController[] players;  // indexed by join order; we search by id when needed
+    public int playerWithHat = -1;
+    int playersInGame = 0;
 
-    private void Awake()
+    // Unique spawn assignment (Master only)
+    Queue<int> _freeSpawnIdx;
+
+    // Fall debounce (Master only)
+    Dictionary<int, double> _lastFallAt = new Dictionary<int, double>();
+    [SerializeField] double fallDebounceSeconds = 1.0;
+
+    // -------------------- Startup --------------------
+    void Start()
     {
-        // lazy singleton - see NetworkManager for better implementation of this pattern
-        // narrator justifies this based on the idea that we're not persisting this via DontDestroyOnLoad
-        instance = this;
-    }
+        players = new PlayerController[Mathf.Max(1, PhotonNetwork.PlayerList.Length)];
 
-    private void Start()
-    {
-        players = new PlayerController[PhotonNetwork.PlayerList.Length];
+        if (PhotonNetwork.IsMasterClient)
+        {
+            // Prepare a shuffled queue of unique spawn indices.
+            var order = Enumerable.Range(0, spawnPoints.Length)
+                                  .OrderBy(_ => UnityEngine.Random.value);
+            _freeSpawnIdx = new Queue<int>(order);
+        }
+
         photonView.RPC("ImInGame", RpcTarget.AllBuffered);
     }
 
-    // called everytime a player finishes its start function
+    // Called by each client after Start.
     [PunRPC]
     void ImInGame()
     {
         playersInGame++;
 
-        // when the last player announces they're in game, each player can spawn themselves
-        if (playersInGame == PhotonNetwork.PlayerList.Length)
-            SpawnPlayer();
+        if (playersInGame == PhotonNetwork.PlayerList.Length && PhotonNetwork.IsMasterClient)
+            AssignInitialSpawns();
     }
 
-    void SpawnPlayer()
+    void AssignInitialSpawns()
     {
-        // instantiate the player across the network
-        GameObject playerObj = PhotonNetwork.Instantiate(playerPrefabLocation, spawnPoints[Random.Range(0, spawnPoints.Length)].position, Quaternion.identity);
+        foreach (var p in PhotonNetwork.PlayerList)
+        {
+            if (_freeSpawnIdx == null || _freeSpawnIdx.Count == 0)
+            {
+                // Refill if needed (shouldn't happen if you have enough points).
+                var refill = Enumerable.Range(0, spawnPoints.Length)
+                                       .OrderBy(_ => UnityEngine.Random.value);
+                _freeSpawnIdx = new Queue<int>(refill);
+            }
 
-        // get the player script
-        PlayerController playerScript = playerObj.GetComponent<PlayerController>();
-
-        // initialize the player
-        playerScript.photonView.RPC("Initialize", RpcTarget.All, PhotonNetwork.LocalPlayer);
+            int idx = _freeSpawnIdx.Dequeue();
+            photonView.RPC("Client_SpawnAt", p, idx);
+        }
     }
 
-    public PlayerController GetPlayer(int playerId)
+    // Runs only on the targeted client.
+    [PunRPC]
+    void Client_SpawnAt(int spawnIndex)
     {
-        return players.First(x => x.id == playerId);
+        Vector3 pos = spawnPoints[Mathf.Clamp(spawnIndex, 0, spawnPoints.Length - 1)].position;
+
+        GameObject playerObj = PhotonNetwork.Instantiate(playerPrefabLocation, pos, Quaternion.identity);
+        var player = playerObj.GetComponent<PlayerController>();
+        player.photonView.RPC("Initialize", RpcTarget.All, PhotonNetwork.LocalPlayer);
     }
 
-    public PlayerController GetPlayer(GameObject playerObject)
+    // -------------------- Player Registry --------------------
+    public void RegisterPlayer(PlayerController pc)
     {
-        return players.First(x => x.gameObject == playerObject);
+        // Store by (id-1) if array large enough; otherwise append in the first null slot.
+        int idx = pc.id - 1;
+        if (idx >= 0 && idx < players.Length) players[idx] = pc;
+        else
+        {
+            for (int i = 0; i < players.Length; i++)
+                if (players[i] == null) { players[i] = pc; break; }
+        }
     }
 
-    // called when the player hits the hatted player - giving them the hat
+    public bool TryGetPlayer(int playerId, out PlayerController p)
+    {
+        p = players.FirstOrDefault(x => x && x.id == playerId);
+        return p != null;
+    }
+
+    public bool TryGetPlayer(GameObject playerObject, out PlayerController p)
+    {
+        p = players.FirstOrDefault(x => x && x.gameObject == playerObject);
+        return p != null;
+    }
+
+    // -------------------- Hat Logic --------------------
     [PunRPC]
     public void GiveHat(int playerId, bool initialGive)
     {
-        // remove the hat from the currently hatted player
-        if (!initialGive)
-            GetPlayer(playerWithHat).SetHat(false);
+        if (!initialGive && TryGetPlayer(playerWithHat, out var prev))
+            prev.SetHat(false);
 
-        // give the hat to the new player
         playerWithHat = playerId;
-        GetPlayer(playerId).SetHat(true);
+
+        if (TryGetPlayer(playerId, out var next))
+            next.SetHat(true);
+
         hatPickupTime = Time.time;
     }
 
-    // is the player able to take the hat at this current time?
-    public bool CanGetHat()
-    {
-        if (Time.time > hatPickupTime + invincibleDuration)
-            return true;
-        else
-            return false;
-    }
+    public bool CanGetHat() => Time.time > hatPickupTime + invincibleDuration;
 
+    // -------------------- Fall Handling --------------------
     [PunRPC]
     void HandleFall(int playerId)
     {
-        // 1) Pick a random spawn point
-        if (spawnPoints == null || spawnPoints.Length == 0)
-            return; // no spawn points configured
+        if (!PhotonNetwork.IsMasterClient) return;
+        if (spawnPoints == null || spawnPoints.Length == 0) return;
 
-        int spawnIdx = Random.Range(0, spawnPoints.Length);
-        Vector3 respawnPos = spawnPoints[spawnIdx].position;
+        double now = PhotonNetwork.Time;
+        if (_lastFallAt.TryGetValue(playerId, out var t) && (now - t) < fallDebounceSeconds)
+            return; // already handled very recently
 
-        // 2) Teleport the fallen player (run on all clients)
-        PlayerController fallen = GetPlayerSafe(playerId);
-        if (fallen != null)
-            fallen.photonView.RPC("Teleport", RpcTarget.All, respawnPos);
+        _lastFallAt[playerId] = now;
 
-        // 3) If they had the hat, give it to a random other player (ignore invincibility)
+        // Choose a respawn point.
+        int spawnIdx = UnityEngine.Random.Range(0, spawnPoints.Length);
+        Vector3 pos = spawnPoints[spawnIdx].position;
+
+        // Teleport once.
+        if (TryGetPlayer(playerId, out var fallen))
+            fallen.photonView.RPC("Teleport", RpcTarget.All, pos);
+
+        // If they had the hat, give it to a random other player (ignore invincibility).
         if (playerWithHat == playerId)
         {
-            // Collect eligible players (someone else in the match)
-            List<PlayerController> eligible = new List<PlayerController>();
-            foreach (var p in players)
-                if (p != null && p.id != playerId)
-                    eligible.Add(p);
-
+            var eligible = players.Where(p => p && p.id != playerId).ToList();
             if (eligible.Count > 0)
             {
-                int idx = Random.Range(0, eligible.Count);
-                int newHatId = eligible[idx].id;
-
-                // Broadcast hat transfer immediately; 'initialGive' = false
-                photonView.RPC("GiveHat", RpcTarget.All, newHatId, false);
+                int newId = eligible[UnityEngine.Random.Range(0, eligible.Count)].id;
+                photonView.RPC("GiveHat", RpcTarget.All, newId, false);
             }
-            // else: only player in room → keep hat on them after teleport
         }
     }
 
-    // Helper that won’t throw if nothing matches
-    private PlayerController GetPlayerSafe(int playerId)
-    {
-        for (int i = 0; i < players.Length; i++)
-        {
-            var p = players[i];
-            if (p != null && p.id == playerId)
-                return p;
-        }
-        return null;
-    }
-
+    // -------------------- Win / Scene --------------------
     [PunRPC]
     void WinGame(int playerId)
     {
         gameEnded = true;
-        PlayerController player = GetPlayer(playerId);
 
-        // set the UI to show who's won
-        GameUI.instance.SetWinText(player.photonPlayer.NickName);
+        if (TryGetPlayer(playerId, out var player))
+            GameUI.instance.SetWinText(player.photonPlayer.NickName);
 
-        Invoke("GoBackToMenu", 3.0f);
+        Invoke(nameof(GoBackToMenu), 3f);
     }
 
     void GoBackToMenu()
