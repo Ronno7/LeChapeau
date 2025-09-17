@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Photon.Pun;
@@ -45,6 +45,12 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
     {
         if (photonView.IsMine)
         {
+            // fall detection → ask Master to handle
+            if (transform.position.y < 0f)
+            {
+                GameManager.instance.photonView.RPC("HandleFall", RpcTarget.MasterClient, id);
+            }
+
             Move();
 
             if (Input.GetKeyDown(KeyCode.Space))
@@ -116,6 +122,22 @@ public class PlayerController : MonoBehaviourPunCallbacks, IPunObservable
         else if (stream.IsReading)
         {
             curHatTime = (float)stream.ReceiveNext(); // receive info about this playercontroller from others
+        }
+    }
+
+    // Teleport is executed on all clients to keep state consistent
+    [PunRPC]
+    public void Teleport(Vector3 newPosition)
+    {
+        transform.position = newPosition;
+
+        // Reset motion so they don't keep falling or carry old momentum
+        if (rig != null)
+        {
+            // If you’re on standard Unity Rigidbody, this is 'velocity'
+            // Change 'linearVelocity' to 'velocity' if needed in your project.
+            rig.linearVelocity = Vector3.zero;
+            rig.angularVelocity = Vector3.zero;
         }
     }
 }

@@ -19,7 +19,7 @@ MonoBehaviour:
     AppIdVoice: 
     AppVersion: 
     UseNameServer: 1
-    FixedRegion: usw
+    FixedRegion: 
     Server: 
     Port: 0
     ProxyServer: 
@@ -42,6 +42,8 @@ MonoBehaviour:
   - ImInGame
   - Initialize
   - WinGame
+  - HandleFall
+  - Teleport
   DisableAutoOpenWizard: 1
   ShowSettings: 1
   DevRegionSetOnce: 1

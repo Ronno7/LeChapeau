@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Photon.Pun;
@@ -90,6 +90,54 @@ public class GameManager : MonoBehaviourPunCallbacks
             return true;
         else
             return false;
+    }
+
+    [PunRPC]
+    void HandleFall(int playerId)
+    {
+        // 1) Pick a random spawn point
+        if (spawnPoints == null || spawnPoints.Length == 0)
+            return; // no spawn points configured
+
+        int spawnIdx = Random.Range(0, spawnPoints.Length);
+        Vector3 respawnPos = spawnPoints[spawnIdx].position;
+
+        // 2) Teleport the fallen player (run on all clients)
+        PlayerController fallen = GetPlayerSafe(playerId);
+        if (fallen != null)
+            fallen.photonView.RPC("Teleport", RpcTarget.All, respawnPos);
+
+        // 3) If they had the hat, give it to a random other player (ignore invincibility)
+        if (playerWithHat == playerId)
+        {
+            // Collect eligible players (someone else in the match)
+            List<PlayerController> eligible = new List<PlayerController>();
+            foreach (var p in players)
+                if (p != null && p.id != playerId)
+                    eligible.Add(p);
+
+            if (eligible.Count > 0)
+            {
+                int idx = Random.Range(0, eligible.Count);
+                int newHatId = eligible[idx].id;
+
+                // Broadcast hat transfer immediately; 'initialGive' = false
+                photonView.RPC("GiveHat", RpcTarget.All, newHatId, false);
+            }
+            // else: only player in room → keep hat on them after teleport
+        }
+    }
+
+    // Helper that won’t throw if nothing matches
+    private PlayerController GetPlayerSafe(int playerId)
+    {
+        for (int i = 0; i < players.Length; i++)
+        {
+            var p = players[i];
+            if (p != null && p.id == playerId)
+                return p;
+        }
+        return null;
     }
 
     [PunRPC]
