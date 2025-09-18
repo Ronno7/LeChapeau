@@ -2,11 +2,12 @@
 using UnityEngine;
 using Photon.Pun;
 using Photon.Realtime;
+using Hashtable = ExitGames.Client.Photon.Hashtable; // alias to avoid namespace clashes
 
 public class ObstacleMovement : MonoBehaviourPunCallbacks
 {
     [Header("Path (CCW)")]
-    public List<Transform> points = new List<Transform>(); // corners/turn points in COUNTER-CLOCKWISE order
+    public List<Transform> points = new List<Transform>(); // turn points in COUNTER-CLOCKWISE order
 
     [Header("Motion")]
     public float speed = 4f;               // units/sec along the loop
@@ -14,15 +15,15 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
     public float turnDuration = 0.12f;     // time to yaw 90° at corners
 
     [Header("Net Mode")]
-    public bool deterministic = true;      // everyone computes same path from shared clock (recommended)
-    public bool useMasterAuthority = false;// Master simulates and others just receive snapshots (use if pushable)
+    public bool deterministic = true;      // everyone computes same path from PhotonNetwork.Time
+    public bool useMasterAuthority = false;// Master simulates & others interpolate (use when pushable)
 
     [Header("Optional Physics")]
-    public bool pushable = false;          // requires useMasterAuthority=true + PTVC on the PhotonView for smooth remotes
-    public Rigidbody rb;                   // optional; used for MovePosition/MoveRotation
+    public bool pushable = false;          // requires useMasterAuthority=true + PTVC observed by PhotonView
+    public Rigidbody rb;                   // used for MovePosition/MoveRotation if present
 
     [Header("Sync")]
-    public string roomStartKey = "obsStart"; // shared start time key in Room.CustomProperties
+    public string roomStartKey = "obsStart"; // shared start time key (Room.CustomProperties)
 
     // internal state
     double startTime;
@@ -31,9 +32,13 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
     float turnT = 0f;
     Quaternion rotFrom, rotTo;
 
-    public override void OnEnable() // keep it simple and correct for PUN
+    public override void OnEnable()
     {
         base.OnEnable();
+
+        // Deterministic and authority are mutually exclusive. Deterministic wins.
+        if (deterministic) useMasterAuthority = false;
+
         if (!rb) rb = GetComponent<Rigidbody>();
         ConfigurePhysics();
         InitStartTime();
@@ -43,7 +48,7 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
 
     public override void OnRoomPropertiesUpdate(ExitGames.Client.Photon.Hashtable props)
     {
-        if (props != null && props.ContainsKey(roomStartKey))
+        if (props != null && props.ContainsKey(roomStartKey) && PhotonNetwork.InRoom)
             startTime = (double)PhotonNetwork.CurrentRoom.CustomProperties[roomStartKey];
     }
 
@@ -51,7 +56,7 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
     {
         if (points == null || points.Count < 2) return;
 
-        // Drive only on owner when using authority (Master is the owner of scene objects).
+        // If using authority, only Master advances motion; remotes just interpolate via PTVC.
         if (useMasterAuthority && PhotonNetwork.IsConnected && !PhotonNetwork.IsMasterClient)
             return;
 
@@ -64,12 +69,12 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
         float segF = t * n;
         int seg = Mathf.FloorToInt(segF) % n;
 
-        // Corner entry → begin a 90° LEFT yaw around LOCAL up
+        // Corner entry → start a 90° LEFT yaw around LOCAL up (+Z for your capsule with X=90)
         if (seg != prevSeg)
         {
             rotFrom = rb ? rb.rotation : transform.rotation;
-            Vector3 axis = (rb ? rb.transform.up : transform.up);    // local up (matches your capsule orientation)
-            rotTo = Quaternion.AngleAxis(-90f, axis) * rotFrom;      // left turn = -90
+            Vector3 axis = rb ? rb.transform.up : transform.up;
+            rotTo = Quaternion.AngleAxis(-90f, axis) * rotFrom;
             turnT = 0f;
             turning = true;
             prevSeg = seg;
@@ -79,7 +84,7 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
         Vector3 pos = SampleLinear(points, t);
         if (rb) rb.MovePosition(pos); else transform.position = pos;
 
-        // Rotation: ease the 90° at corners; otherwise face segment direction (projected on local-up plane)
+        // Rotation: ease the 90° at corners; otherwise face segment direction projected on local-up plane
         Vector3 up = rb ? rb.transform.up : transform.up;
         if (turning)
         {
@@ -110,13 +115,13 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
         if (useMasterAuthority)
         {
             bool iAmMaster = !PhotonNetwork.IsConnected || PhotonNetwork.IsMasterClient;
-            rb.isKinematic = !iAmMaster; // Master simulates, remotes kinematic
+            rb.isKinematic = !iAmMaster;  // Master simulates; remotes are kinematic
             rb.interpolation = iAmMaster ? RigidbodyInterpolation.Interpolate
                                          : RigidbodyInterpolation.None;
             rb.collisionDetectionMode = pushable ? CollisionDetectionMode.ContinuousSpeculative
                                                  : CollisionDetectionMode.Discrete;
         }
-        else // deterministic everyone simulates; keep kinematic so there’s no divergent pushes
+        else // deterministic: everyone computes; keep kinematic to avoid divergent pushes
         {
             rb.isKinematic = true;
             rb.interpolation = RigidbodyInterpolation.None;
@@ -137,15 +142,17 @@ public class ObstacleMovement : MonoBehaviourPunCallbacks
         {
             startTime = (double)room.CustomProperties[roomStartKey];
         }
+        else if (PhotonNetwork.IsMasterClient)
+        {
+            startTime = PhotonNetwork.Time;
+            // Use the safe setter from NetworkManager to avoid "not ready"/Leaving errors.
+            var ht = new Hashtable { { roomStartKey, startTime } };
+            NetworkManager.TrySetRoomProps(ht);
+        }
         else
         {
-            // Master seeds a shared start time so all clients align deterministically.
+            // Fallback so non-master moves immediately; real value will arrive via OnRoomPropertiesUpdate.
             startTime = PhotonNetwork.Time;
-            if (PhotonNetwork.IsMasterClient)
-            {
-                var ht = new ExitGames.Client.Photon.Hashtable { { roomStartKey, startTime } };
-                room.SetCustomProperties(ht);
-            }
         }
     }
 
