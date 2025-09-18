@@ -1,6 +1,6 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using TMPro;
 using Photon.Pun;
@@ -20,87 +20,102 @@ public class Menu : MonoBehaviourPunCallbacks
     public TextMeshProUGUI playerListText;
     public Button startGameButton;
 
-    // Start is called before the first frame update
-    void Start()
+    void Awake()
     {
-        // disable the main screen buttons at start as we're not connected to the server yet
-        createRoomButton.interactable = false;
-        joinRoomButton.interactable = false;
+        if (EventSystem.current == null)
+        {
+            var es = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            DontDestroyOnLoad(es);
+        }
     }
 
-    public override void OnConnectedToMaster()
+    public override void OnEnable()
     {
-        createRoomButton.interactable = true;
-        joinRoomButton.interactable = true;
+        base.OnEnable();
+        RefreshMainButtons();
+    }
+
+    void Start()
+    {
+        RefreshMainButtons();
+        SetScreen(mainScreen);
+    }
+
+    // NEW: keep checking until connected so the buttons light up as soon as ready
+    void Update()
+    {
+        if (!PhotonNetwork.IsConnectedAndReady)
+            RefreshMainButtons();
+    }
+
+    void RefreshMainButtons()
+    {
+        bool ready = PhotonNetwork.IsConnectedAndReady;
+        createRoomButton.interactable = ready;
+        joinRoomButton.interactable = ready;
+    }
+
+    public override void OnConnectedToMaster() => RefreshMainButtons();
+
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        createRoomButton.interactable = false;
+        joinRoomButton.interactable = false;
+        SetScreen(mainScreen);
     }
 
     void SetScreen(GameObject screen)
     {
-        // deactivate all screens
         mainScreen.SetActive(false);
         lobbyScreen.SetActive(false);
-
-        // enable the requested screen
         screen.SetActive(true);
     }
 
     public void OnCreateRoomButton(TMP_InputField roomNameInput)
     {
-        NetworkManager.instance.CreateRoom(roomNameInput.text);
+        if (!PhotonNetwork.IsConnectedAndReady) return;
+        var name = roomNameInput.text.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+        NetworkManager.instance.CreateRoom(name);
     }
 
     public void OnJoinRoomButton(TMP_InputField roomNameInput)
     {
-        NetworkManager.instance.JoinRoom(roomNameInput.text);
+        if (!PhotonNetwork.IsConnectedAndReady) return;
+        var name = roomNameInput.text.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+        NetworkManager.instance.JoinRoom(name);
     }
 
     public void OnPlayerNameUpdate(TMP_InputField playerNameInput)
     {
-        PhotonNetwork.NickName = playerNameInput.text;
+        PhotonNetwork.NickName = playerNameInput.text.Trim();
     }
 
     public override void OnJoinedRoom()
     {
         SetScreen(lobbyScreen);
-        // since there's now a player in the lobby, tell everyone to update their lobby UI
-        photonView.RPC("UpdateLobbyUI", RpcTarget.All);
+        photonView.RPC(nameof(UpdateLobbyUI), RpcTarget.All);
     }
 
-    public override void OnPlayerLeftRoom(Player otherPlayer)
-    {
-        // we don't RPC it like when we joined the lobby
-        // because OnJoinRoom is only called for the client who just joined
-        // whereas OnPlayerLeftRoom gets called for all clients in the room
-        UpdateLobbyUI();
-    }
+    public override void OnPlayerLeftRoom(Player otherPlayer) => UpdateLobbyUI();
+    public override void OnMasterClientSwitched(Player newMasterClient) => UpdateLobbyUI();
 
-    // called whenever someone joins or leaves the lobby
     [PunRPC]
     public void UpdateLobbyUI()
     {
         playerListText.text = "";
-
-        // display all the players currently in the lobby
-        foreach (Player player in PhotonNetwork.PlayerList)
-        {
-            playerListText.text += player.NickName + "\n";
-        }
-
-        // only the host can start the game
-        if (PhotonNetwork.IsMasterClient)
-            startGameButton.interactable = true;
-        else
-            startGameButton.interactable = false;
+        foreach (Player p in PhotonNetwork.PlayerList)
+            playerListText.text += p.NickName + "\n";
+        startGameButton.interactable = PhotonNetwork.IsMasterClient;
     }
 
-    public void OnLeaveLobbyButton()
+    public override void OnLeftRoom()
     {
-        PhotonNetwork.LeaveRoom();
         SetScreen(mainScreen);
+        RefreshMainButtons();
     }
 
-    public void OnStartGameButton()
-    {
-        NetworkManager.instance.photonView.RPC("ChangeScene", RpcTarget.All, "Game");
-    }
+    public void OnLeaveLobbyButton() => PhotonNetwork.LeaveRoom();
+    public void OnStartGameButton() => NetworkManager.instance.StartMatch("Game");
 }

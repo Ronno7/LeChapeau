@@ -447,3 +447,5 @@ MonoBehaviour:
   hatObject: {fileID: 978933362994428606}
   curHatTime: 0
   rig: {fileID: 6342748224760014757}
+  fallY: 0
+  rearmMargin: 0.5

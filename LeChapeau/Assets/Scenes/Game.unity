@@ -878,7 +878,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c5e3615bd3035a46b2fdbc19b9bb81b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  points: []
+  points:
+  - {fileID: 1674105953}
+  - {fileID: 1620854569}
+  - {fileID: 928694410}
+  - {fileID: 1920608118}
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.12
@@ -1061,7 +1065,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c5e3615bd3035a46b2fdbc19b9bb81b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  points: []
+  points:
+  - {fileID: 1920608118}
+  - {fileID: 1674105953}
+  - {fileID: 1620854569}
+  - {fileID: 928694410}
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.12
@@ -2510,7 +2518,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c5e3615bd3035a46b2fdbc19b9bb81b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  points: []
+  points:
+  - {fileID: 928694410}
+  - {fileID: 1920608118}
+  - {fileID: 1674105953}
+  - {fileID: 1620854569}
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.12
@@ -4479,7 +4491,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5c5e3615bd3035a46b2fdbc19b9bb81b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  points: []
+  points:
+  - {fileID: 1620854569}
+  - {fileID: 928694410}
+  - {fileID: 1920608118}
+  - {fileID: 1674105953}
   speed: 4
   spacingOffset01: 0
   turnDuration: 0.12
